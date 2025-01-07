@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
 require('dotenv').config()
 const app = express()
 const port = process.env.PORT || 5000;
@@ -33,10 +34,62 @@ async function run() {
         const cartCollection = client.db('bistroDb').collection('carts');
 
 
-        // user related apis--
-        app.get('/users', async (req, res) => {
+        // JWT Token Create
+        app.post('/jwt', async (req, res) => {
+            const userInfo = req.body
+            const token = jwt.sign(userInfo, process.env.ACCESS_TOKEN_SECRET, {
+                expiresIn: '5h'
+            })
+            res.send({ token })
+        })
+
+        // verify token middleware
+        const verifyToken = (req, res, next) => {
+            console.log('inside verify token', req.headers.authorization);
+
+            if (!req.headers.authorization) {
+                console.log('No Authorization Header Found!');
+                return res.status(401).send({ message: 'unauthorized Access DGM' });
+            }
+            const token = req.headers.authorization.split(' ')[1];
+
+            jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (error, decoded) => {
+                if (error) {
+                    return res.status(401).send({ message: 'unauthorized access DGM' })
+                }
+                req.decoded = decoded;
+                next();
+            })
+        };
+
+
+
+        // --------------------user related apis---------------------
+        app.get('/users', verifyToken, async (req, res) => {
+            // console.log(req.headers)
+            console.log('khaise re...........................................')
             const result = await userCollection.find().toArray()
             res.send(result)
+        })
+
+        // user isAdmin checking (IMPORTANCE)
+        app.get('/users/admin/:email', verifyToken, async (req, res) => {
+            const email = req.params.email
+
+            // token verify
+            if (email !== req.decoded.email) {
+                return res.status(403).send({ message: 'forbidden access' })
+            }
+            // after successfully verify-try to get this user data by (findOne)
+            const query = { email: email }
+            const user = await userCollection.findOne(query)
+
+            // after successfully get user the check- user role= "admin"/"user"/"moderator"
+            let admin = false;
+            if (user) {
+                admin = user?.role === 'admin';
+            }
+            res.send({ admin });
         })
 
 
@@ -54,11 +107,33 @@ async function run() {
             res.send(result)
         })
 
+        app.patch('/users/admin/:id', async (req, res) => {
+            const id = req.params.id;
+            const filter = { _id: new ObjectId(id) }
+            const updatedDoc = {
+                $set: {
+                    role: 'admin'
+                }
+            }
+            const result = await userCollection.updateOne(filter, updatedDoc)
+            res.send(result)
+        })
+
+
+
+        app.delete('/users/:id', async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) }
+            const result = await userCollection.deleteOne(query)
+            res.send(result)
+        })
 
 
 
 
 
+
+        // -----------Menu related Apis-----------
         app.get('/menu', async (req, res) => {
             const result = await menuCollection.find().toArray()
             res.send(result);
