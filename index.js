@@ -35,6 +35,7 @@ async function run() {
       const menuCollection = client.db('bistroDb').collection('menu');
       const reviewCollection = client.db('bistroDb').collection('reviews');
       const cartCollection = client.db('bistroDb').collection('carts');
+      const paymentCollection = client.db('bistroDb').collection('payments');
 
 
       // JWT Token Create
@@ -221,7 +222,7 @@ async function run() {
          res.send(result)
       })
 
-      // payment intent
+      // payment intent for (secret token)
       app.post('/create-payment-intent', async (req, res) => {
          const { price } = req.body;
          const amount = parseInt(price * 100);
@@ -238,7 +239,33 @@ async function run() {
          })
       });
 
+      app.get('/paymentHistory/:email',verifyToken,  async (req, res) => {
+         const query = {email: req.params.email}
+         if(req.params.email !== req.decoded.email){
+            return res.status(403).send('forbidden access')
+         }
+         const result = await paymentCollection.findOne(query)
+         res.send(result);
+      })
 
+
+      // payment confirm API saved in DB
+      app.post('/payments', async (req, res) => {
+         const payment = req.body;
+         const paymentResult = await paymentCollection.insertOne(payment)
+
+
+         // carefully delete each item from the cart
+         console.log('payment Info', payment)
+         const query = {
+            _id: {
+               $in: payment.cartIds.map(id => new ObjectId(id))
+            }
+         };
+
+         const deleteResult = await cartCollection.deleteMany(query)
+         res.send({ paymentResult, deleteResult })
+      })
 
 
       // Send a ping to confirm a successful connection
