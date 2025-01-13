@@ -239,17 +239,23 @@ async function run() {
          })
       });
 
-      app.get('/paymentHistory/:email',verifyToken,  async (req, res) => {
-         const query = {email: req.params.email}
-         if(req.params.email !== req.decoded.email){
-            return res.status(403).send('forbidden access')
-         }
-         const result = await paymentCollection.findOne(query)
+
+
+
+      // payment confirm API saved in DB
+
+
+      app.get('/payments/:email', verifyToken, async (req, res) => {
+         const query = { email: req.params.email }
+         console.log('hitted')
+         // if (req.params.email !== req.decoded.email) {
+         //    return res.status(403).send('forbidden access')
+         // }
+         const result = await paymentCollection.find(query).toArray()
          res.send(result);
       })
 
 
-      // payment confirm API saved in DB
       app.post('/payments', async (req, res) => {
          const payment = req.body;
          const paymentResult = await paymentCollection.insertOne(payment)
@@ -261,11 +267,81 @@ async function run() {
             _id: {
                $in: payment.cartIds.map(id => new ObjectId(id))
             }
-         };
-
+         }
          const deleteResult = await cartCollection.deleteMany(query)
          res.send({ paymentResult, deleteResult })
       })
+
+
+      // statistics analytics
+      app.get('/admin-stats', verifyToken, verifyAdmin, async (req, res) => {
+         const users = await userCollection.estimatedDocumentCount();
+         const menuItems = await menuCollection.estimatedDocumentCount();
+         const orders = await paymentCollection.estimatedDocumentCount()
+
+         // this is not the best way
+         // const payments = await paymentCollection.find().toArray();
+         // const revenue = payments.reduce((total, payment) => total + payment.price, 0);
+
+         const result = await paymentCollection.aggregate([
+            {
+               $group: {
+                  _id: null,
+                  totalRevenue: {
+                     $sum: '$price'
+                  }
+               }
+            }
+         ]).toArray()
+         const revenue = result.length > 0 ? result[0].totalRevenue : 0;
+
+         res.send({
+            users,
+            menuItems,
+            orders,
+            revenue
+         })
+      })
+
+
+      // stats and pie chart
+      app.get('/order-stats',verifyToken, verifyAdmin, async (req, res) => {
+         const result = await paymentCollection.aggregate([
+            {
+               $unwind: '$menuItemIds'
+            },
+            {
+               $lookup: {
+                  from: 'menu',
+                  localField: 'menuItemIds',
+                  foreignField: '_id',
+                  as: 'menuItems'
+               }
+            },
+            {
+               $unwind: '$menuItems'
+            },
+            {
+               $group: {
+                  _id: '$menuItems.category',
+                  quantity: { $sum: 1 },
+                  revenue: { $sum: '$menuItems.price' }
+               }
+            },
+            {
+               $project: {
+                  _id: 0,
+                  category: '$_id',
+                  quantity: '$quantity',
+                  revenue: '$revenue'
+
+               }
+            }
+         ]).toArray()
+         res.send(result);
+      })
+
+
 
 
       // Send a ping to confirm a successful connection
@@ -293,8 +369,7 @@ app.listen(port, () => {
 
 /**
  * Naming convention
- * _____________________
- * 
+ * _____________ || _____________ || _____ ||  _____
  * app.get('/users')
  * app.get('/user/:id')
  * app.post('/users)
@@ -303,5 +378,9 @@ app.listen(port, () => {
  * app.delete('/users/:id)
  * 
  * 
- * 
+//  * ORDER STATUS
+ 1. load all the payment
+ 2. for every menuItemIds (which is an array), go find the item menu collection
+ 3. for every item in the collection that ypu found from payment entry (document)
  */
+
